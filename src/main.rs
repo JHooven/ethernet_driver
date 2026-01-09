@@ -1,0 +1,68 @@
+#![no_std]
+#![no_main]
+
+use cortex_m_rt::entry;
+use panic_halt as _;
+
+mod eth;
+#[cfg(feature = "eth-driver")]
+mod net;
+
+#[entry]
+fn main() -> ! {
+    // Safety: take device peripherals once
+    let dp = stm32f4::stm32f429::Peripherals::take().unwrap();
+
+    // Enable clocks needed for SYSCFG and GPIO used by RMII
+    let rcc = &dp.RCC;
+    let syscfg = &dp.SYSCFG;
+
+    // Enable GPIOA, GPIOC, GPIOG and SYSCFG clocks
+    // Also enable Ethernet clocks (MAC, TX, RX)
+    rcc.ahb1enr.modify(|_, w| {
+        w.gpioaen().enabled()
+            .gpiocen().enabled()
+            .gpiogen().enabled()
+            .ethmacen().enabled()
+            .ethmactxen().enabled()
+            .ethmacrxen().enabled()
+    });
+
+    // Reset Ethernet MAC
+    rcc.ahb1rstr.modify(|_, w| w.ethmacrst().set_bit());
+    rcc.ahb1rstr.modify(|_, w| w.ethmacrst().clear_bit());
+
+    // Select RMII interface
+    // Select RMII: set MII_RMII_SEL bit
+    syscfg.pmc.modify(|_, w| w.mii_rmii_sel().set_bit());
+
+    // Configure RMII pins to AF11, very high speed, push-pull, no pull
+    unsafe { eth::configure_rmii_pins(&dp) };
+
+    // Initialize Ethernet MAC/DMA (PHY wiring will be completed once confirmed)
+    let mut driver = eth::EthernetDriver::new(dp);
+
+    // Bring up link (will block/poll until link is up or timeout internally)
+    driver.init(/*phy_addr=*/0);
+
+    #[cfg(feature = "eth-driver")]
+    {
+        // Minimal smoltcp ICMP responder scaffold
+        static mut SOCKET_STORAGE: [smoltcp::iface::SocketStorage<'static>; 4] = [smoltcp::iface::SocketStorage::EMPTY; 4];
+        let mac = smoltcp::wire::EthernetAddress([0x02, 0x00, 0x00, 0x00, 0x00, 0x01]);
+        let ip = smoltcp::wire::Ipv4Address::new(192, 168, 1, 100);
+        let mut stack = unsafe { net::NetStack::new(&mut driver, mac, ip, &mut SOCKET_STORAGE[..]) };
+
+        let mut ticks: i64 = 0;
+        loop {
+            stack.poll(ticks);
+            ticks = ticks.wrapping_add(1);
+        }
+    }
+
+    #[cfg(not(feature = "eth-driver"))]
+    loop {
+        let _link = driver.link_up();
+        let _ = driver.receive_frame();
+    }
+}

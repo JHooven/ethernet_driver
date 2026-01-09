@@ -1,0 +1,38 @@
+[package]
+name = "ethernet_driver"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+# Cortex-M runtime and panic behavior
+cortex-m = "0.7"
+cortex-m-rt = "0.7"
+panic-halt = "0.2"
+
+# STM32F4 PAC (peripheral access crate)
+stm32f4 = { version = "0.15", features = ["stm32f429", "rt"] }
+
+# Optional Ethernet MAC/DMA driver and networking (feature-gated)
+stm32-eth = { version = "0.6", features = ["stm32f429"], optional = true }
+smoltcp = { version = "0.11", default-features = false, features = ["proto-ipv4", "socket-raw", "socket-icmp", "medium-ethernet"], optional = true }
+heapless = { version = "0.8", optional = true }
+fugit = "0.3"
+
+[profile.dev]
+codegen-units = 1
+debug = 2
+debug-assertions = true
+incremental = false
+opt-level = 1
+
+[profile.release]
+codegen-units = 1
+debug = 1
+debug-assertions = false
+incremental = false
+lto = true
+opt-level = "s"
+
+[features]
+default = []
+eth-driver = ["dep:stm32-eth", "dep:smoltcp", "dep:heapless"]

@@ -1,0 +1,11 @@
+[build]
+target = "thumbv7em-none-eabihf"
+
+[target.thumbv7em-none-eabihf]
+rustflags = [
+  "-C", "link-arg=-Tlink.x",
+]
+
+# Optional: use probe-rs as runner (adjust chip/package as needed)
+[runner]
+runner = "probe-rs run --chip STM32F429ZITx"
