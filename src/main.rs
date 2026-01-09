@@ -5,6 +5,7 @@ use cortex_m_rt::entry;
 use panic_halt as _;
 
 mod eth;
+mod log;
 #[cfg(feature = "eth-driver")]
 mod net;
 
@@ -47,6 +48,20 @@ fn main() -> ! {
 
     #[cfg(feature = "eth-driver")]
     {
+        // Ensure link is up before starting the network stack (bounded spin)
+        let mut spins: u32 = 0;
+        const MAX_SPINS: u32 = 5_000_000;
+        while !driver.link_up() {
+            spins = spins.wrapping_add(1);
+            if spins >= MAX_SPINS { break; }
+        }
+        #[cfg(feature = "eth-driver")]
+        {
+            if spins >= MAX_SPINS {
+                crate::log::warn("Link-up timeout; starting stack anyway");
+            }
+        }
+
         // Minimal smoltcp ICMP responder scaffold
         static mut SOCKET_STORAGE: [smoltcp::iface::SocketStorage<'static>; 4] = [smoltcp::iface::SocketStorage::EMPTY; 4];
         let mac = smoltcp::wire::EthernetAddress([0x02, 0x00, 0x00, 0x00, 0x00, 0x01]);

@@ -175,3 +175,54 @@ ping 192.168.1.100
 - MDIO address strapped to `0`
 - Flash firmware: `cargo run`
 - Link LED on RJ45 turns on after autonegotiation
+
+## Logging
+
+This firmware supports two optional logging paths:
+
+- defmt RTT (recommended): enable richer, structured logs over RTT.
+- Semihosting (fallback): simple messages printed via the debugger console.
+
+### Enable defmt logging
+
+Build with the `defmt-logging` feature alongside the driver:
+
+```bash
+cargo build --features "eth-driver defmt-logging" --target thumbv7em-none-eabihf
+```
+
+To view logs, use a runner that supports defmt decoding (e.g., `probe-run`). If you have `probe-run` configured as the runner in `.cargo/config.toml`, you can run:
+
+```bash
+cargo run --features "eth-driver defmt-logging"
+```
+
+Alternatively, use `probe-rs` with a separate defmt print tool:
+
+```bash
+# Flash using probe-rs
+probe-rs run --chip STM32F429ZI target/thumbv7em-none-eabihf/debug/ethernet_driver
+
+# In another terminal, attach a defmt printer to RTT (tooling varies)
+```
+
+### Semihosting fallback
+
+If defmt is not enabled, the firmware logs via semihosting.
+Ensure your debug setup supports semihosting; messages will appear in the debugger console.
+
+### Adjust log level
+
+You can change the defmt verbosity via the `DEFMT_LOG` environment variable. Supported levels: `error`, `warn`, `info`, `debug`, `trace`.
+
+Examples:
+
+```bash
+# Highest verbosity
+DEFMT_LOG=trace cargo run --features "eth-driver defmt-logging"
+
+# Minimal verbosity
+DEFMT_LOG=error cargo run --features "eth-driver defmt-logging"
+```
+
+A default of `info` is set in `.cargo/config.toml`. Override per-invocation using the env var as shown above.

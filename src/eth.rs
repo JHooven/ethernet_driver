@@ -9,6 +9,19 @@ use stm32_eth::{self, dma::EthernetDMA, dma::RxRingEntry, dma::TxRingEntry, EthP
 // PHY integration can be added via stm32_eth::mac::phy if desired
 #[cfg(feature = "eth-driver")]
 use stm32_eth::hal::{gpio::GpioExt, rcc::RccExt};
+#[cfg(feature = "eth-driver")]
+use stm32_eth::hal::gpio::Speed as GpioSpeed;
+#[cfg(feature = "eth-driver")]
+use stm32_eth::mac::phy::BarePhy;
+use stm32_eth::mac::Pause;
+use stm32_eth::mac::Phy;
+use stm32_eth::mac::Speed;
+#[cfg(feature = "eth-driver")]
+use cortex_m_semihosting::hprintln;
+#[cfg(feature = "eth-driver")]
+use stm32_eth::hal::gpio::{Alternate, Pin};
+#[cfg(feature = "eth-driver")]
+use stm32_eth::mac::EthernetMACWithMii;
 
 // Size constants
 const MTU: usize = 1536; // includes Ethernet frame + some headroom
@@ -16,6 +29,8 @@ const MTU: usize = 1536; // includes Ethernet frame + some headroom
 #[cfg(feature = "eth-driver")]
 pub struct EthernetDriver {
     eth_dma: EthernetDMA<'static, 'static>,
+    mac_mii: Option<EthernetMACWithMii<Pin<'A', 2, Alternate<11>>, Pin<'C', 1, Alternate<11>>>>,
+    phy_addr: u8,
 }
 
 #[cfg(not(feature = "eth-driver"))]
@@ -37,7 +52,7 @@ impl EthernetDriver {
         let gpioc = dp.GPIOC.split();
         let gpiog = dp.GPIOG.split();
 
-        // Build RMII pin mapping for STM32F429I-DISC1
+        // Build RMII pin mapping for STM32F429I-DISC1 (stm32-eth configures AF/speed)
         let eth_pins = EthPins {
             ref_clk: gpioa.pa1,
             crs: gpioa.pa7,
@@ -48,7 +63,11 @@ impl EthernetDriver {
             rx_d1: gpioc.pc5,
         };
 
-        // MDIO/MDC pins (PA2/PC1) are configured by PAC helper below; using `new` without MIIM here
+        // MDIO/MDC pins (PA2/PC1) must be AF11 VeryHigh for MIIM
+        let mut mdio = gpioa.pa2.into_alternate::<11>();
+        mdio.set_speed(GpioSpeed::VeryHigh);
+        let mut mdc = gpioc.pc1.into_alternate::<11>();
+        mdc.set_speed(GpioSpeed::VeryHigh);
 
         // DMA rings must be in RAM accessible by peripheral (not CCM)
         use core::mem::MaybeUninit;
@@ -66,11 +85,11 @@ impl EthernetDriver {
         let rx_entries = unsafe { RX_RING.write(core::array::from_fn(|_| RxRingEntry::new())) };
         let tx_entries = unsafe { TX_RING.write(core::array::from_fn(|_| TxRingEntry::new())) };
 
-        let stm32_eth::Parts { dma: eth_dma, .. } =
-            stm32_eth::new(parts, &mut rx_entries[..], &mut tx_entries[..], clocks, eth_pins)
+        let stm32_eth::Parts { dma: eth_dma, mac: mac_mii, .. } =
+            stm32_eth::new_with_mii(parts, &mut rx_entries[..], &mut tx_entries[..], clocks, eth_pins, mdio, mdc)
                 .expect("stm32-eth init");
 
-        Self { eth_dma }
+        Self { eth_dma, mac_mii: Some(mac_mii), phy_addr: 0 }
     }
 
     #[cfg(not(feature = "eth-driver"))]
@@ -81,9 +100,46 @@ impl EthernetDriver {
 
     // Initialize the MAC, DMA and the PHY at a given MDIO address
     #[cfg(feature = "eth-driver")]
-    pub fn init(&mut self, _phy_addr: u8) {
-        // Optional: enable ETH RX/TX interrupts and perform PHY setup via MIIM if desired.
-        // self.eth_dma.enable_interrupt();
+    pub fn init(&mut self, phy_addr: u8) {
+        // Initialize external PHY via MIIM and wait for link
+        self.phy_addr = phy_addr;
+        let mac_mii = self.mac_mii.take().expect("MAC with MII unavailable");
+        let mut phy = BarePhy::new(mac_mii, self.phy_addr, Pause::Symmetric);
+        // Reset and autoneg
+        phy.blocking_reset();
+        let ad = phy.best_supported_advertisement();
+        phy.set_autonegotiation_advertisement(ad);
+        // Wait until autonegotiation completes and link is up (bounded spins)
+        const MAX_SPINS: u32 = 5_000_000;
+        let mut spins: u32 = 0;
+        while !phy.autoneg_completed() {
+            spins = spins.wrapping_add(1);
+            if spins >= MAX_SPINS { break; }
+        }
+        if spins >= MAX_SPINS { crate::log::warn("PHY autonegotiation timeout"); }
+        spins = 0;
+        while !phy.phy_link_up() {
+            spins = spins.wrapping_add(1);
+            if spins >= MAX_SPINS { break; }
+        }
+        if spins >= MAX_SPINS { crate::log::warn("PHY link-up timeout"); }
+
+        // Choose MAC speed/duplex based on PHY status
+        let st = phy.status();
+        let mac_speed = if st.fd_100base_x {
+            Speed::FullDuplexBase100Tx
+        } else if st.hd_100base_x {
+            Speed::HalfDuplexBase100Tx
+        } else if st.fd_10mbps {
+            Speed::FullDuplexBase10T
+        } else {
+            Speed::HalfDuplexBase10T
+        };
+
+        // Release MIIM back to driver and set MAC speed
+        let mut mac_mii = phy.release();
+        mac_mii.set_speed(mac_speed);
+        self.mac_mii = Some(mac_mii);
     }
 
     #[cfg(not(feature = "eth-driver"))]
@@ -106,8 +162,12 @@ impl EthernetDriver {
     pub fn link_up(&mut self) -> bool {
         #[cfg(feature = "eth-driver")]
         {
-            // If RX DMA is running and not stalled, assume link is up
-            self.eth_dma.rx_is_running()
+            // Query PHY quickly via MIIM
+            let mac_mii = self.mac_mii.take().expect("MAC with MII unavailable");
+            let mut phy = BarePhy::new(mac_mii, self.phy_addr, Pause::Symmetric);
+            let up = phy.phy_link_up();
+            self.mac_mii = Some(phy.release());
+            up
         }
         #[cfg(not(feature = "eth-driver"))]
         {
@@ -167,26 +227,26 @@ impl EthernetDriver {
 // - TXD1:    PG14 (AF11)
 // This uses raw PAC register writes to avoid a HAL dependency.
 pub unsafe fn configure_rmii_pins(dp: &pac::Peripherals) {
-    configure_port_af11_gpioa(&dp.GPIOA, &[1, 2, 7]);
-    configure_port_af11_gpioc(&dp.GPIOC, &[1, 4, 5]);
-    configure_port_af11_gpiog(&dp.GPIOG, &[11, 13, 14]);
+    unsafe { configure_port_af11_gpioa(&dp.GPIOA, &[1, 2, 7]); }
+    unsafe { configure_port_af11_gpioc(&dp.GPIOC, &[1, 4, 5]); }
+    unsafe { configure_port_af11_gpiog(&dp.GPIOG, &[11, 13, 14]); }
 }
 
 unsafe fn configure_port_af11_gpioa(gpio: &pac::gpioa::RegisterBlock, pins: &[u8]) {
     for &pin in pins {
-        set_pin_af11_gpioa(gpio, pin);
+        unsafe { set_pin_af11_gpioa(gpio, pin); }
     }
 }
 
 unsafe fn configure_port_af11_gpioc(gpio: &pac::gpioc::RegisterBlock, pins: &[u8]) {
     for &pin in pins {
-        set_pin_af11_gpioc(gpio, pin);
+        unsafe { set_pin_af11_gpioc(gpio, pin); }
     }
 }
 
 unsafe fn configure_port_af11_gpiog(gpio: &pac::gpiog::RegisterBlock, pins: &[u8]) {
     for &pin in pins {
-        set_pin_af11_gpiog(gpio, pin);
+        unsafe { set_pin_af11_gpiog(gpio, pin); }
     }
 }
 
@@ -316,8 +376,8 @@ unsafe fn mdio_set_cr(mac: &pac::ETHERNET_MAC, hclk_hz: u32) {
 }
 
 unsafe fn mdio_write(mac: &pac::ETHERNET_MAC, hclk_hz: u32, phy_addr: u8, reg_addr: u8, val: u16) {
-    mdio_wait_not_busy(mac);
-    mdio_set_cr(mac, hclk_hz);
+    unsafe { mdio_wait_not_busy(mac); }
+    unsafe { mdio_set_cr(mac, hclk_hz); }
     mac.macmiidr.write(|w| w.md().bits(val));
     mac.macmiiar.modify(|r, w| unsafe {
         let mut bits = r.bits();
@@ -334,8 +394,8 @@ unsafe fn mdio_write(mac: &pac::ETHERNET_MAC, hclk_hz: u32, phy_addr: u8, reg_ad
 }
 
 unsafe fn mdio_read(mac: &pac::ETHERNET_MAC, hclk_hz: u32, phy_addr: u8, reg_addr: u8) -> u16 {
-    mdio_wait_not_busy(mac);
-    mdio_set_cr(mac, hclk_hz);
+    unsafe { mdio_wait_not_busy(mac); }
+    unsafe { mdio_set_cr(mac, hclk_hz); }
     mac.macmiiar.modify(|r, w| unsafe {
         let mut bits = r.bits();
         // Clear PA[15:11], RDA[10:6], MW, MB

@@ -6,6 +6,9 @@ rustflags = [
   "-C", "link-arg=-Tlink.x",
 ]
 
-# Optional: use probe-rs as runner (adjust chip/package as needed)
-[runner]
-runner = "probe-rs run --chip STM32F429ZITx"
+# Use probe-run as runner for defmt RTT logging (adjust chip if needed)
+runner = "probe-run --chip STM32F429ZI"
+
+[env]
+# Default defmt log level; override on the command line as needed
+DEFMT_LOG = "info"
