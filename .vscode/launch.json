@@ -1,0 +1,70 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "Cortex-Debug (OpenOCD, break on main)",
+      "type": "cortex-debug",
+      "request": "launch",
+      "servertype": "openocd",
+      "cwd": "${workspaceFolder}",
+      "executable": "${workspaceFolder}/target/thumbv7em-none-eabihf/debug/ethernet_driver",
+      "device": "STM32F429ZI",
+      "runToEntryPoint": "main",
+      "configFiles": [
+        "${workspaceFolder}/.vscode/openocd.cfg"
+      ],
+      "svdFile": "${workspaceFolder}/.vscode/STM32F429.svd",
+      "preLaunchTask": "cargo build (thumbv7em + eth-driver)",
+      "postLaunchCommands": [
+        "monitor reset halt"
+      ]
+    },
+    {
+      "name": "Cortex-Debug (OpenOCD, defmt RTT)",
+      "type": "cortex-debug",
+      "request": "launch",
+      "servertype": "openocd",
+      "cwd": "${workspaceFolder}",
+      "executable": "${workspaceFolder}/target/thumbv7em-none-eabihf/debug/ethernet_driver",
+      "device": "STM32F429ZI",
+      "runToEntryPoint": "main",
+      "configFiles": [
+        "${workspaceFolder}/.vscode/openocd.cfg"
+      ],
+      "svdFile": "${workspaceFolder}/.vscode/STM32F429.svd",
+      "preLaunchTask": "cargo build (thumbv7em + eth-driver + defmt-logging)",
+      "postLaunchCommands": [
+        "monitor reset halt"
+      ],
+      "rttConfig": {
+        "enabled": true,
+        "decoders": [
+          {
+            "port": 0,
+            "label": "defmt",
+            "decoder": "defmt",
+            "elf": "${workspaceFolder}/target/thumbv7em-none-eabihf/debug/ethernet_driver"
+          }
+        ]
+      }
+    },
+    {
+      "name": "probe-rs (break on main)",
+      "type": "probe-rs-debug",
+      "request": "launch",
+      "cwd": "${workspaceFolder}",
+      "programBinary": "${workspaceFolder}/target/thumbv7em-none-eabihf/debug/ethernet_driver",
+      "chip": "STM32F429ZITx",
+      "preLaunchTask": "cargo build (thumbv7em + eth-driver)"
+    },
+    {
+      "name": "probe-rs (defmt RTT)",
+      "type": "probe-rs-debug",
+      "request": "launch",
+      "cwd": "${workspaceFolder}",
+      "programBinary": "${workspaceFolder}/target/thumbv7em-none-eabihf/debug/ethernet_driver",
+      "chip": "STM32F429ZITx",
+      "preLaunchTask": "cargo build (thumbv7em + eth-driver + defmt-logging)"
+    }
+  ]
+}
