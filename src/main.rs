@@ -1,8 +1,12 @@
 #![no_std]
 #![no_main]
 
-use cortex_m_rt::entry;
+use cortex_m_rt::{entry, exception};
 use panic_halt as _;
+
+// Ensure defmt RTT logger is linked when defmt-logging is enabled
+#[cfg(feature = "defmt-logging")]
+use defmt_rtt as _;
 
 mod eth;
 mod log;
@@ -11,6 +15,9 @@ mod net;
 
 #[entry]
 fn main() -> ! {
+    #[cfg(feature = "defmt-logging")]
+    crate::log::info("Booting ethernet_driver...");
+
     // Safety: take device peripherals once
     let dp = stm32f4::stm32f429::Peripherals::take().unwrap();
 
@@ -65,7 +72,7 @@ fn main() -> ! {
         // Minimal smoltcp ICMP responder scaffold
         static mut SOCKET_STORAGE: [smoltcp::iface::SocketStorage<'static>; 4] = [smoltcp::iface::SocketStorage::EMPTY; 4];
         let mac = smoltcp::wire::EthernetAddress([0x02, 0x00, 0x00, 0x00, 0x00, 0x01]);
-        let ip = smoltcp::wire::Ipv4Address::new(192, 168, 1, 100);
+        let ip = smoltcp::wire::Ipv4Address::new(172, 16, 10, 200);
         let mut stack = unsafe { net::NetStack::new(&mut driver, mac, ip, &mut SOCKET_STORAGE[..]) };
 
         let mut ticks: i64 = 0;
@@ -78,6 +85,24 @@ fn main() -> ! {
     #[cfg(not(feature = "eth-driver"))]
     loop {
         let _link = driver.link_up();
-        let _ = driver.receive_frame();
+        let frame = driver.receive_frame();
+        if let Some(frame) = frame {
+            crate::log::info("Received Ethernet frame");
+        }
+    }
+}
+
+// Trap faults early with a clear symbol so the debugger halts here
+#[exception]
+unsafe fn HardFault(_ef: &cortex_m_rt::ExceptionFrame) -> ! {
+    loop {
+        cortex_m::asm::bkpt();
+    }
+}
+
+#[exception]
+unsafe fn DefaultHandler(_irqn: i16) {
+    loop {
+        cortex_m::asm::bkpt();
     }
 }
