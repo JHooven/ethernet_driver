@@ -13,7 +13,7 @@
       "configFiles": [
         "${workspaceFolder}/.vscode/openocd.cfg"
       ],
-      "svdFile": "${workspaceFolder}/.vscode/STM32F429.svd",
+      "svdFile": "${workspaceFolder}/STM32F429.svd",
       "preLaunchTask": "cargo build (thumbv7em + eth-driver)",
       "postLaunchCommands": [
         "monitor reset halt"
@@ -31,7 +31,7 @@
       "configFiles": [
         "${workspaceFolder}/.vscode/openocd.cfg"
       ],
-      "svdFile": "${workspaceFolder}/.vscode/STM32F429.svd",
+      "svdFile": "${workspaceFolder}/STM32F429.svd",
       "preLaunchTask": "cargo build (thumbv7em + eth-driver + defmt-logging)",
       "postLaunchCommands": [
         "monitor reset halt"
