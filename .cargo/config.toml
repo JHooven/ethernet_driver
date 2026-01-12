@@ -9,7 +9,7 @@ rustflags = [
 ]
 
 # Optional: use probe-run for `cargo run` (comment out if using other tools)
-runner = "probe-run --chip STM32F429ZI"
+runner = "probe-run --chip STM32F429ZITx"
 
 [env]
 # Default defmt log level; override per-invocation if desired
