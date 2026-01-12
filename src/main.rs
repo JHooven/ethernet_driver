@@ -21,6 +21,13 @@ fn main() -> ! {
     // Safety: take device peripherals once
     let dp = stm32f4::stm32f429::Peripherals::take().unwrap();
 
+    // Enable configurable fault exceptions so we get more precise diagnostics
+    unsafe {
+        let scb = &*cortex_m::peripheral::SCB::PTR;
+        // Set MEMFAULTENA (bit16), BUSFAULTENA (bit17), USGFAULTENA (bit18)
+        scb.shcsr.modify(|r| r | ((1 << 16) | (1 << 17) | (1 << 18)));
+    }
+
     // Enable clocks needed for SYSCFG and GPIO used by RMII
     let rcc = &dp.RCC;
     let syscfg = &dp.SYSCFG;
@@ -35,25 +42,41 @@ fn main() -> ! {
             .ethmactxen().enabled()
             .ethmacrxen().enabled()
     });
+    #[cfg(feature = "defmt-logging")]
+    crate::log::info("AHB1 clocks enabled");
     // SYSCFG sits on APB2; enable its clock before accessing SYSCFG registers
     rcc.apb2enr.modify(|_, w| w.syscfgen().enabled());
+    #[cfg(feature = "defmt-logging")]
+    crate::log::info("APB2 SYSCFG clock enabled");
 
     // Reset Ethernet MAC
     rcc.ahb1rstr.modify(|_, w| w.ethmacrst().set_bit());
     rcc.ahb1rstr.modify(|_, w| w.ethmacrst().clear_bit());
+    // Ensure writes complete to catch bus faults precisely
+    cortex_m::asm::dsb();
 
     // Select RMII interface
     // Select RMII: set MII_RMII_SEL bit
     syscfg.pmc.modify(|_, w| w.mii_rmii_sel().set_bit());
+    // Ensure SYSCFG write is committed before proceeding
+    cortex_m::asm::dsb();
+    #[cfg(feature = "defmt-logging")]
+    crate::log::info("SYSCFG RMII selected");
 
     // Configure RMII pins to AF11, very high speed, push-pull, no pull
     unsafe { eth::configure_rmii_pins(&dp) };
+    #[cfg(feature = "defmt-logging")]
+    crate::log::info("RMII pins configured");
 
     // Initialize Ethernet MAC/DMA (PHY wiring will be completed once confirmed)
     let mut driver = eth::EthernetDriver::new(dp);
+    #[cfg(feature = "defmt-logging")]
+    crate::log::info("EthernetDriver constructed");
 
     // Bring up link (will block/poll until link is up or timeout internally)
     driver.init(/*phy_addr=*/0);
+    #[cfg(feature = "defmt-logging")]
+    crate::log::info("EthernetDriver init complete");
 
     #[cfg(feature = "eth-driver")]
     {
@@ -105,7 +128,40 @@ unsafe fn HardFault(ef: &cortex_m_rt::ExceptionFrame) -> ! {
             ef.lr(),
             ef.xpsr()
         );
+        // Log SCB fault status registers to categorize the fault
+        let scb = unsafe { &*cortex_m::peripheral::SCB::PTR };
+        let cfsr = scb.cfsr.read(); // Configurable Fault Status Register
+        let hfsr = scb.hfsr.read(); // HardFault Status Register
+        let mmfar = scb.mmfar.read(); // MemManage Fault Address
+        let bfar = scb.bfar.read(); // BusFault Address
+        defmt::error!(
+            "SCB: CFSR=0x{:08x} HFSR=0x{:08x} MMFAR=0x{:08x} BFAR=0x{:08x}",
+            cfsr,
+            hfsr,
+            mmfar,
+            bfar
+        );
         // Give RTT time to flush, then break for debugging
+        for _ in 0..1_000_000 { cortex_m::asm::nop(); }
+        cortex_m::asm::bkpt();
+        loop { cortex_m::asm::wfi(); }
+    }
+    #[cfg(not(feature = "defmt-logging"))]
+    {
+        loop {
+            cortex_m::asm::bkpt();
+        }
+    }
+}
+
+#[exception]
+unsafe fn BusFault() -> ! {
+    #[cfg(feature = "defmt-logging")]
+    {
+        let scb = &*cortex_m::peripheral::SCB::PTR;
+        let cfsr = scb.cfsr.read();
+        let bfar = scb.bfar.read();
+        defmt::error!("BusFault: CFSR=0x{:08x} BFAR=0x{:08x}", cfsr, bfar);
         for _ in 0..1_000_000 { cortex_m::asm::nop(); }
         cortex_m::asm::bkpt();
         loop { cortex_m::asm::wfi(); }

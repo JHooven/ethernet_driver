@@ -13,11 +13,12 @@ use stm32_eth::hal::{gpio::GpioExt, rcc::RccExt};
 use stm32_eth::hal::gpio::Speed as GpioSpeed;
 #[cfg(feature = "eth-driver")]
 use stm32_eth::mac::phy::BarePhy;
-use stm32_eth::mac::Pause;
-use stm32_eth::mac::Phy;
-use stm32_eth::mac::Speed;
 #[cfg(feature = "eth-driver")]
-use cortex_m_semihosting::hprintln;
+use stm32_eth::mac::Pause;
+#[cfg(feature = "eth-driver")]
+use stm32_eth::mac::Phy;
+#[cfg(feature = "eth-driver")]
+use stm32_eth::mac::Speed;
 #[cfg(feature = "eth-driver")]
 use stm32_eth::hal::gpio::{Alternate, Pin};
 #[cfg(feature = "eth-driver")]
@@ -178,20 +179,14 @@ impl EthernetDriver {
         }
     }
 
-    pub fn transmit_frame(&mut self, frame: &[u8]) -> Result<(), ()> {
-        #[cfg(feature = "eth-driver")]
-        {
-            if frame.len() > MTU { return Err(()); }
-            self.eth_dma
-                .send(frame.len(), None, |buf| {
-                    buf[..frame.len()].copy_from_slice(frame);
-                })
-                .map_err(|_| ())
-        }
-        #[cfg(not(feature = "eth-driver"))]
-        {
-            Err(())
-        }
+    #[cfg(feature = "eth-driver")]
+    pub fn transmit_frame(&mut self, _frame: &[u8]) -> Result<(), ()> {
+        if _frame.len() > MTU { return Err(()); }
+        self.eth_dma
+            .send(_frame.len(), None, |buf| {
+                buf[.._frame.len()].copy_from_slice(_frame);
+            })
+            .map_err(|_| ())
     }
 
     pub fn receive_frame(&mut self) -> Option<(usize, [u8; MTU])> {
@@ -357,10 +352,12 @@ unsafe fn set_pin_af11_gpiog(gpio: &pac::gpiog::RegisterBlock, pin: u8) {
 
 // --- MDIO helpers using MAC registers (PAC) ---
 // MACMIIAR fields from RM0090: PA (phy addr), RDA (reg addr), MB (busy), MW (write), CR (clock range)
+#[cfg(not(feature = "eth-driver"))]
 unsafe fn mdio_wait_not_busy(mac: &pac::ETHERNET_MAC) {
     while mac.macmiiar.read().mb().bit_is_set() {}
 }
 
+#[cfg(not(feature = "eth-driver"))]
 unsafe fn mdio_set_cr(mac: &pac::ETHERNET_MAC, hclk_hz: u32) {
     // Choose CR based on HCLK; simple heuristic
     // 0b000: /16, 0b001: /26, 0b010: /42, 0b011: /62, 0b100: /102
@@ -375,6 +372,7 @@ unsafe fn mdio_set_cr(mac: &pac::ETHERNET_MAC, hclk_hz: u32) {
     });
 }
 
+#[cfg(not(feature = "eth-driver"))]
 unsafe fn mdio_write(mac: &pac::ETHERNET_MAC, hclk_hz: u32, phy_addr: u8, reg_addr: u8, val: u16) {
     unsafe { mdio_wait_not_busy(mac); }
     unsafe { mdio_set_cr(mac, hclk_hz); }
@@ -390,9 +388,10 @@ unsafe fn mdio_write(mac: &pac::ETHERNET_MAC, hclk_hz: u32, phy_addr: u8, reg_ad
              | 1;
         w.bits(bits)
     });
-    mdio_wait_not_busy(mac);
+    unsafe { mdio_wait_not_busy(mac); }
 }
 
+#[cfg(not(feature = "eth-driver"))]
 unsafe fn mdio_read(mac: &pac::ETHERNET_MAC, hclk_hz: u32, phy_addr: u8, reg_addr: u8) -> u16 {
     unsafe { mdio_wait_not_busy(mac); }
     unsafe { mdio_set_cr(mac, hclk_hz); }
@@ -406,6 +405,6 @@ unsafe fn mdio_read(mac: &pac::ETHERNET_MAC, hclk_hz: u32, phy_addr: u8, reg_add
              | 1;
         w.bits(bits)
     });
-    mdio_wait_not_busy(mac);
+    unsafe { mdio_wait_not_busy(mac); }
     mac.macmiidr.read().md().bits()
 }

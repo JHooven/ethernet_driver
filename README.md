@@ -15,8 +15,6 @@ This workspace contains a minimal Ethernet MAC/DMA driver for the STM32F429 (DIS
 - MDIO/MDC (AF11):
   - MDIO:    PA2
   - MDC:     PC1
-- RMII is selected via `SYSCFG.PMC.MII_RMII_SEL`.
-
 Ensure the external PHY (e.g., LAN8720) is wired for RMII and provides a 50 MHz REF_CLK to PA1.
 
 ## Defaults
@@ -46,6 +44,27 @@ cargo build --features eth-driver --target thumbv7em-none-eabihf
 
 If linking fails with "memory.x not found", add a suitable linker script matching STM32F429 memory layout.
 
+## Debugging in VS Code
+
+- Use the provided launch configurations in [.vscode/launch.json](.vscode/launch.json):
+  - Cortex-Debug (OpenOCD) variants break on `main` and support defmt RTT.
+  - probe-rs variants also break on `main` and enable RTT/defmt decoding.
+- For rich peripheral register views, place an SVD at [.vscode/STM32F429.svd](.vscode/STM32F429.svd) and the launch will pick it up.
+
+Getting an SVD:
+- From ST's CMSIS pack (STM32F4): extract `STM32F429.svd`.
+- Or from the stm32-rs project’s SVDs. Copy the F429 SVD file to `.vscode/STM32F429.svd`.
+
+Optional tools:
+```bash
+cargo install defmt-print           # defmt decoder
+cargo install probe-rs-tools        # probe-rs CLI (rtt/run/flash)
+```
+
+RTT/defmt via tasks:
+- Start RTT streaming: run the VS Code task "defmt-print (probe-rs RTT)".
+- Decode logs: run "defmt-decode (pipe)" to attach `defmt-print` to the current ELF.
+
 ## Notes
 
 - DMA RX/TX rings are placed in normal SRAM (not CCM). This is required for peripheral access per stm32-eth docs.
@@ -62,6 +81,10 @@ This project scaffolds a no_std Rust firmware for STM32F429I (e.g. STM32F429ZI) 
 - RMII pin mapping (typical, AF11):
   - REF_CLK: PA1
   - MDIO:    PA2
+
+## Wiring Diagram
+
+For a visual pin-to-pin guide, see [diagrams/lan8720_rmii_wiring.md](diagrams/lan8720_rmii_wiring.md).
   - CRS_DV:  PA7
   - MDC:     PC1
   - RXD0:    PC4
