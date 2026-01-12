@@ -16,11 +16,7 @@ mod net;
 #[entry]
 fn main() -> ! {
     #[cfg(feature = "defmt-logging")]
-    {
-        // Write the SEGGER RTT control block early so debuggers can find it
-        rtt_target::rtt_init!();
-        crate::log::info("Booting ethernet_driver...");
-    }
+    crate::log::info("Booting ethernet_driver...");
 
     // Safety: take device peripherals once
     let dp = stm32f4::stm32f429::Peripherals::take().unwrap();
@@ -39,6 +35,8 @@ fn main() -> ! {
             .ethmactxen().enabled()
             .ethmacrxen().enabled()
     });
+    // SYSCFG sits on APB2; enable its clock before accessing SYSCFG registers
+    rcc.apb2enr.modify(|_, w| w.syscfgen().enabled());
 
     // Reset Ethernet MAC
     rcc.ahb1rstr.modify(|_, w| w.ethmacrst().set_bit());
@@ -107,9 +105,10 @@ unsafe fn HardFault(ef: &cortex_m_rt::ExceptionFrame) -> ! {
             ef.lr(),
             ef.xpsr()
         );
-        loop {
-            cortex_m::asm::wfi();
-        }
+        // Give RTT time to flush, then break for debugging
+        for _ in 0..1_000_000 { cortex_m::asm::nop(); }
+        cortex_m::asm::bkpt();
+        loop { cortex_m::asm::wfi(); }
     }
     #[cfg(not(feature = "defmt-logging"))]
     {
