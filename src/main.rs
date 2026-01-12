@@ -16,7 +16,11 @@ mod net;
 #[entry]
 fn main() -> ! {
     #[cfg(feature = "defmt-logging")]
-    crate::log::info("Booting ethernet_driver...");
+    {
+        // Write the SEGGER RTT control block early so debuggers can find it
+        rtt_target::rtt_init!();
+        crate::log::info("Booting ethernet_driver...");
+    }
 
     // Safety: take device peripherals once
     let dp = stm32f4::stm32f429::Peripherals::take().unwrap();
@@ -92,17 +96,42 @@ fn main() -> ! {
     }
 }
 
-// Trap faults early with a clear symbol so the debugger halts here
+// Fault handlers: prefer RTT logging when enabled; otherwise break for debugging
 #[exception]
-unsafe fn HardFault(_ef: &cortex_m_rt::ExceptionFrame) -> ! {
-    loop {
-        cortex_m::asm::bkpt();
+unsafe fn HardFault(ef: &cortex_m_rt::ExceptionFrame) -> ! {
+    #[cfg(feature = "defmt-logging")]
+    {
+        defmt::error!(
+            "HardFault pc=0x{:08x} lr=0x{:08x} xpsr=0x{:08x}",
+            ef.pc(),
+            ef.lr(),
+            ef.xpsr()
+        );
+        loop {
+            cortex_m::asm::wfi();
+        }
+    }
+    #[cfg(not(feature = "defmt-logging"))]
+    {
+        loop {
+            cortex_m::asm::bkpt();
+        }
     }
 }
 
 #[exception]
-unsafe fn DefaultHandler(_irqn: i16) {
-    loop {
-        cortex_m::asm::bkpt();
+unsafe fn DefaultHandler(irqn: i16) {
+    #[cfg(feature = "defmt-logging")]
+    {
+        defmt::error!("Unhandled IRQ {}", irqn);
+        loop {
+            cortex_m::asm::wfi();
+        }
+    }
+    #[cfg(not(feature = "defmt-logging"))]
+    {
+        loop {
+            cortex_m::asm::bkpt();
+        }
     }
 }
