@@ -55,6 +55,7 @@
       "cwd": "${workspaceFolder}",
       "programBinary": "${workspaceFolder}/target/thumbv7em-none-eabihf/debug/ethernet_driver",
       "chip": "STM32F429ZITx",
+      "svdFile": "${workspaceFolder}/STM32F429.svd",
       "preLaunchTask": "cargo build (thumbv7em + eth-driver)"
     },
     {
@@ -64,6 +65,7 @@
       "cwd": "${workspaceFolder}",
       "programBinary": "${workspaceFolder}/target/thumbv7em-none-eabihf/debug/ethernet_driver",
       "chip": "STM32F429ZITx",
+      "svdFile": "${workspaceFolder}/STM32F429.svd",
       "preLaunchTask": "cargo build (thumbv7em + eth-driver + defmt-logging)"
     }
   ]
