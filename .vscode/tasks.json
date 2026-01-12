@@ -1,0 +1,63 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "cargo build (thumbv7em + eth-driver)",
+      "type": "shell",
+      "command": "cargo",
+      "args": [
+        "build",
+        "--features",
+        "eth-driver",
+        "--target",
+        "thumbv7em-none-eabihf"
+      ],
+      "problemMatcher": ["$rustc"],
+      "group": "build"
+    },
+    {
+      "label": "cargo build (thumbv7em + eth-driver + defmt-logging)",
+      "type": "shell",
+      "command": "cargo",
+      "args": [
+        "build",
+        "--features",
+        "eth-driver defmt-logging",
+        "--target",
+        "thumbv7em-none-eabihf"
+      ],
+      "problemMatcher": ["$rustc"],
+      "group": "build"
+    },
+    {
+      "label": "cargo build (release, thumbv7em + eth-driver)",
+      "type": "shell",
+      "command": "cargo",
+      "args": [
+        "build",
+        "--release",
+        "--features",
+        "eth-driver",
+        "--target",
+        "thumbv7em-none-eabihf"
+      ],
+      "problemMatcher": ["$rustc"],
+      "group": "build"
+    },
+    {
+      "label": "cargo build (release, thumbv7em + eth-driver + defmt-logging)",
+      "type": "shell",
+      "command": "cargo",
+      "args": [
+        "build",
+        "--release",
+        "--features",
+        "eth-driver defmt-logging",
+        "--target",
+        "thumbv7em-none-eabihf"
+      ],
+      "problemMatcher": ["$rustc"],
+      "group": "build"
+    }
+  ]
+}
