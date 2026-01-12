@@ -2,22 +2,15 @@
 target = "thumbv7em-none-eabihf"
 
 [target.thumbv7em-none-eabihf]
-# Ensure defmt's `.defmt` section is retained by the linker
+# Keep linker scripts for cortex-m-rt and defmt so `.defmt` is preserved
 rustflags = [
   "-C", "link-arg=-Tlink.x",
   "-C", "link-arg=-Tdefmt.x",
 ]
-[build]
-target = "thumbv7em-none-eabihf"
 
-[target.thumbv7em-none-eabihf]
-rustflags = [
-  "-C", "link-arg=-Tlink.x",
-]
-
-# Use probe-run as runner for defmt RTT logging (adjust chip if needed)
+# Optional: use probe-run for `cargo run` (comment out if using other tools)
 runner = "probe-run --chip STM32F429ZI"
 
 [env]
-# Default defmt log level; override on the command line as needed
+# Default defmt log level; override per-invocation if desired
 DEFMT_LOG = "info"
