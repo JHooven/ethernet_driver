@@ -28,45 +28,64 @@ fn main() -> ! {
         scb.shcsr.modify(|r| r | ((1 << 16) | (1 << 17) | (1 << 18)));
     }
 
-    // Enable clocks needed for SYSCFG and GPIO used by RMII
+    // Ensure SYSCFG clock is enabled and RMII is selected early (required by ETH)
     let rcc = &dp.RCC;
     let syscfg = &dp.SYSCFG;
+    rcc.apb2enr.modify(|_, w| w.syscfgen().enabled());
+    cortex_m::asm::dsb();
+    syscfg.pmc.modify(|_, w| w.mii_rmii_sel().set_bit());
+    cortex_m::asm::dsb();
+    #[cfg(feature = "defmt-logging")]
+    crate::log::info("SYSCFG clock enabled; RMII selected");
 
-    // Enable GPIOA, GPIOC, GPIOG and SYSCFG clocks
-    // Also enable Ethernet clocks (MAC, TX, RX)
+    // Enable Ethernet peripheral clocks (MAC, TX, RX) before driver init
     rcc.ahb1enr.modify(|_, w| {
-        w.gpioaen().enabled()
-            .gpiocen().enabled()
-            .gpiogen().enabled()
-            .ethmacen().enabled()
+        w.ethmacen().enabled()
             .ethmactxen().enabled()
             .ethmacrxen().enabled()
     });
-    #[cfg(feature = "defmt-logging")]
-    crate::log::info("AHB1 clocks enabled");
-    // SYSCFG sits on APB2; enable its clock before accessing SYSCFG registers
-    rcc.apb2enr.modify(|_, w| w.syscfgen().enabled());
-    #[cfg(feature = "defmt-logging")]
-    crate::log::info("APB2 SYSCFG clock enabled");
-
-    // Reset Ethernet MAC
-    rcc.ahb1rstr.modify(|_, w| w.ethmacrst().set_bit());
-    rcc.ahb1rstr.modify(|_, w| w.ethmacrst().clear_bit());
-    // Ensure writes complete to catch bus faults precisely
-    cortex_m::asm::dsb();
-
-    // Select RMII interface
-    // Select RMII: set MII_RMII_SEL bit
-    syscfg.pmc.modify(|_, w| w.mii_rmii_sel().set_bit());
-    // Ensure SYSCFG write is committed before proceeding
     cortex_m::asm::dsb();
     #[cfg(feature = "defmt-logging")]
-    crate::log::info("SYSCFG RMII selected");
+    crate::log::info("ETH clocks enabled (MAC/TX/RX)");
 
-    // Configure RMII pins to AF11, very high speed, push-pull, no pull
-    unsafe { eth::configure_rmii_pins(&dp) };
-    #[cfg(feature = "defmt-logging")]
-    crate::log::info("RMII pins configured");
+    // For the stm32-eth driver path, let the HAL/driver configure remaining clocks and pins.
+    // Keep the manual setup only when the eth-driver feature is OFF.
+    #[cfg(not(feature = "eth-driver"))]
+    {
+        // Enable clocks needed for SYSCFG and GPIO used by RMII
+        let rcc = &dp.RCC;
+        let syscfg = &dp.SYSCFG;
+        rcc.ahb1enr.modify(|_, w| {
+            w.gpioaen().enabled()
+                .gpiocen().enabled()
+                .gpiogen().enabled()
+                .ethmacen().enabled()
+                .ethmactxen().enabled()
+                .ethmacrxen().enabled()
+        });
+        #[cfg(feature = "defmt-logging")]
+        crate::log::info("AHB1 clocks enabled");
+        // SYSCFG sits on APB2; enable its clock before accessing SYSCFG registers
+        rcc.apb2enr.modify(|_, w| w.syscfgen().enabled());
+        #[cfg(feature = "defmt-logging")]
+        crate::log::info("APB2 SYSCFG clock enabled");
+
+        // Reset Ethernet MAC
+        rcc.ahb1rstr.modify(|_, w| w.ethmacrst().set_bit());
+        rcc.ahb1rstr.modify(|_, w| w.ethmacrst().clear_bit());
+        cortex_m::asm::dsb();
+
+        // Select RMII interface
+        syscfg.pmc.modify(|_, w| w.mii_rmii_sel().set_bit());
+        cortex_m::asm::dsb();
+        #[cfg(feature = "defmt-logging")]
+        crate::log::info("SYSCFG RMII selected");
+
+        // Configure RMII pins to AF11, very high speed, push-pull, no pull
+        unsafe { eth::configure_rmii_pins(&dp) };
+        #[cfg(feature = "defmt-logging")]
+        crate::log::info("RMII pins configured");
+    }
 
     // Initialize Ethernet MAC/DMA (PHY wiring will be completed once confirmed)
     let mut driver = eth::EthernetDriver::new(dp);
@@ -104,6 +123,7 @@ fn main() -> ! {
         loop {
             stack.poll(ticks);
             ticks = ticks.wrapping_add(1);
+            
         }
     }
 
